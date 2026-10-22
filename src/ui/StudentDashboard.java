@@ -1,4 +1,3 @@
-
 package ui;
 
 import model.Course;
@@ -30,14 +29,14 @@ public class StudentDashboard extends JFrame {
 
     // Available courses table
     private final DefaultTableModel availableModel =
-            createTableModel();
+            createTableModel(false);
 
     private final JTable availableTable =
             new JTable(availableModel);
 
     // Registered courses table
     private final DefaultTableModel registeredModel =
-            createTableModel();
+            createTableModel(true);
 
     private final JTable registeredTable =
             new JTable(registeredModel);
@@ -67,18 +66,33 @@ public class StudentDashboard extends JFrame {
         showPage(AVAILABLE_PAGE);
     }
 
-    // Course ID remains in the model but is hidden from students.
-    private DefaultTableModel createTableModel() {
+    // Completion status is included only in the registered courses table.
+    private DefaultTableModel createTableModel(boolean includeStatus) {
 
-        return new DefaultTableModel(
-                new String[]{
-                        "ID",
-                        "Course Code",
-                        "Course Name",
-                        "Credits",
-                        "Capacity",
-                        "Enrolled"
-                }, 0) {
+        String[] columns;
+
+        if (includeStatus) {
+            columns = new String[]{
+                    "ID",
+                    "Course Code",
+                    "Course Name",
+                    "Credits",
+                    "Capacity",
+                    "Enrolled",
+                    "Completion Status"
+            };
+        } else {
+            columns = new String[]{
+                    "ID",
+                    "Course Code",
+                    "Course Name",
+                    "Credits",
+                    "Capacity",
+                    "Enrolled"
+            };
+        }
+
+        return new DefaultTableModel(columns, 0) {
 
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -316,25 +330,18 @@ public class StudentDashboard extends JFrame {
         }
     }
 
-    // Load courses registered by the current student.
+    // Load registered courses and their completion status.
     private void loadRegisteredCourses() {
 
         try {
-            List<Course> courses =
-                    registrationRepository.findRegisteredCourses(
+            List<Object[]> registrations =
+                    registrationRepository.findRegisteredCoursesWithStatus(
                             user.getUserId());
 
             registeredModel.setRowCount(0);
 
-            for (Course course : courses) {
-                registeredModel.addRow(new Object[]{
-                        course.getCourseId(),
-                        course.getCourseCode(),
-                        course.getCourseName(),
-                        course.getCredits(),
-                        course.getCapacity(),
-                        course.getEnrolled()
-                });
+            for (Object[] registration : registrations) {
+                registeredModel.addRow(registration);
             }
 
         } catch (RuntimeException e) {
@@ -357,7 +364,6 @@ public class StudentDashboard extends JFrame {
             return null;
         }
 
-        // Convert the visible sorted row to the model row.
         int modelRow =
                 table.convertRowIndexToModel(selectedRow);
 
@@ -418,10 +424,7 @@ public class StudentDashboard extends JFrame {
         } catch (RuntimeException e) {
             JOptionPane.showMessageDialog(
                     this,
-                    "Registration failed. The course may be full, "
-                            + "unavailable, or you may already be "
-                            + "registered.\n"
-                            + e.getMessage(),
+                    "Registration failed.\n" + e.getMessage(),
                     "Registration Error",
                     JOptionPane.ERROR_MESSAGE);
         }

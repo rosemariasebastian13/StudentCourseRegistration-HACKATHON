@@ -1,13 +1,16 @@
-
 package ui;
 
+import database.DBConnection;
 import model.Course;
 import model.User;
 import repository.CourseRepository;
+import repository.PrerequisiteRepository;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.List;
 
 public class AdminDashboard extends JFrame {
@@ -16,6 +19,9 @@ public class AdminDashboard extends JFrame {
 
     private final CourseRepository courseRepository =
             new CourseRepository();
+
+    private final PrerequisiteRepository prerequisiteRepository =
+            new PrerequisiteRepository();
 
     private final DefaultTableModel tableModel =
             new DefaultTableModel(
@@ -130,7 +136,7 @@ public class AdminDashboard extends JFrame {
         }
     }
 
-    // Add a course with a capacity.
+    // Add a course and its prerequisite in one transaction.
     private void addCourse() {
 
         JTextField codeField = new JTextField();
@@ -138,16 +144,31 @@ public class AdminDashboard extends JFrame {
         JTextField creditsField = new JTextField();
         JTextField capacityField = new JTextField("60");
 
+        JList<Object> prerequisiteList;
+
+        try {
+            prerequisiteList = createPrerequisiteList(0, null);
+        } catch (RuntimeException e) {
+            showDatabaseError("Could not load prerequisite courses.", e);
+            return;
+        }
+
+        JScrollPane prerequisiteScroll = new JScrollPane(
+                prerequisiteList);
+        prerequisiteScroll.setPreferredSize(new Dimension(300, 100));
+
         Object[] fields = {
                 "Course code:", codeField,
                 "Course name:", nameField,
                 "Credits:", creditsField,
-                "Capacity:", capacityField
+                "Capacity:", capacityField,
+                "Prerequisite course:", prerequisiteScroll
         };
 
         int choice = JOptionPane.showConfirmDialog(
                 this, fields, "Add Course",
-                JOptionPane.OK_CANCEL_OPTION);
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.PLAIN_MESSAGE);
 
         if (choice != JOptionPane.OK_OPTION) {
             return;
@@ -163,11 +184,34 @@ public class AdminDashboard extends JFrame {
 
             validateCourse(code, name, credits, capacity);
 
+            Integer prerequisiteId =
+                    getSelectedPrerequisiteId(prerequisiteList);
+
             Course course = new Course(
                     0, code, name, credits,
                     true, capacity, 0);
 
-            courseRepository.save(course);
+            try (Connection connection = DBConnection.getConnection()) {
+                connection.setAutoCommit(false);
+
+                try {
+                    int newCourseId =
+                            courseRepository.save(connection, course);
+
+                    prerequisiteRepository.setPrerequisite(
+                            connection, newCourseId, prerequisiteId);
+
+                    connection.commit();
+
+                } catch (SQLException | RuntimeException e) {
+                    try {
+                        connection.rollback();
+                    } catch (SQLException rollbackError) {
+                        e.addSuppressed(rollbackError);
+                    }
+                    throw e;
+                }
+            }
 
             JOptionPane.showMessageDialog(
                     this, "Course added successfully.");
@@ -181,6 +225,11 @@ public class AdminDashboard extends JFrame {
         } catch (IllegalArgumentException e) {
             showValidationError(e.getMessage());
 
+        } catch (SQLException e) {
+            showDatabaseError(
+                    "Could not add the course and prerequisite. "
+                            + "The changes were rolled back.", e);
+
         } catch (RuntimeException e) {
             JOptionPane.showMessageDialog(
                     this,
@@ -191,7 +240,7 @@ public class AdminDashboard extends JFrame {
         }
     }
 
-    // Edit course details and capacity.
+    // Edit course details and prerequisite in one transaction.
     private void updateCourse() {
 
         int selectedRow = courseTable.getSelectedRow();
@@ -227,18 +276,38 @@ public class AdminDashboard extends JFrame {
         JLabel enrolledLabel =
                 new JLabel("Currently enrolled: " + enrolled);
 
+        JList<Object> prerequisiteList;
+
+        try {
+            Integer currentPrerequisiteId =
+                    prerequisiteRepository.findPrerequisiteId(courseId);
+
+            prerequisiteList = createPrerequisiteList(
+                    courseId, currentPrerequisiteId);
+
+        } catch (RuntimeException e) {
+            showDatabaseError("Could not load the course prerequisite.", e);
+            return;
+        }
+
+        JScrollPane prerequisiteScroll = new JScrollPane(
+                prerequisiteList);
+        prerequisiteScroll.setPreferredSize(new Dimension(300, 100));
+
         Object[] fields = {
                 "Course code:", codeField,
                 "Course name:", nameField,
                 "Credits:", creditsField,
                 "Capacity:", capacityField,
                 enrolledLabel,
-                availableBox
+                availableBox,
+                "Prerequisite course:", prerequisiteScroll
         };
 
         int choice = JOptionPane.showConfirmDialog(
                 this, fields, "Edit Course",
-                JOptionPane.OK_CANCEL_OPTION);
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.PLAIN_MESSAGE);
 
         if (choice != JOptionPane.OK_OPTION) {
             return;
@@ -260,6 +329,9 @@ public class AdminDashboard extends JFrame {
                                 + enrolled + " students already enrolled.");
             }
 
+            Integer prerequisiteId =
+                    getSelectedPrerequisiteId(prerequisiteList);
+
             Course updatedCourse = new Course(
                     courseId,
                     code,
@@ -269,7 +341,26 @@ public class AdminDashboard extends JFrame {
                     capacity,
                     enrolled);
 
-            courseRepository.update(updatedCourse);
+            try (Connection connection = DBConnection.getConnection()) {
+                connection.setAutoCommit(false);
+
+                try {
+                    courseRepository.update(connection, updatedCourse);
+
+                    prerequisiteRepository.setPrerequisite(
+                            connection, courseId, prerequisiteId);
+
+                    connection.commit();
+
+                } catch (SQLException | RuntimeException e) {
+                    try {
+                        connection.rollback();
+                    } catch (SQLException rollbackError) {
+                        e.addSuppressed(rollbackError);
+                    }
+                    throw e;
+                }
+            }
 
             JOptionPane.showMessageDialog(
                     this, "Course updated successfully.");
@@ -283,6 +374,11 @@ public class AdminDashboard extends JFrame {
         } catch (IllegalArgumentException e) {
             showValidationError(e.getMessage());
 
+        } catch (SQLException e) {
+            showDatabaseError(
+                    "Could not update the course and prerequisite. "
+                            + "The changes were rolled back.", e);
+
         } catch (RuntimeException e) {
             JOptionPane.showMessageDialog(
                     this,
@@ -292,6 +388,52 @@ public class AdminDashboard extends JFrame {
                     "Course Error",
                     JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    // Build a single-selection prerequisite list.
+    // The first option, None, removes any existing prerequisite.
+    private JList<Object> createPrerequisiteList(
+            int courseId, Integer selectedPrerequisiteId) {
+
+        DefaultListModel<Object> listModel = new DefaultListModel<>();
+        listModel.addElement("None");
+
+        int selectedIndex = 0;
+
+        List<PrerequisiteRepository.CourseOption> courses =
+                prerequisiteRepository.findOtherCourses(courseId);
+
+        for (PrerequisiteRepository.CourseOption option : courses) {
+            listModel.addElement(option);
+
+            if (selectedPrerequisiteId != null
+                    && option.getCourseId() == selectedPrerequisiteId) {
+                selectedIndex = listModel.size() - 1;
+            }
+        }
+
+        JList<Object> list = new JList<>(listModel);
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setSelectedIndex(selectedIndex);
+        list.setVisibleRowCount(4);
+
+        return list;
+    }
+
+    // Convert the selected list item into a prerequisite ID.
+    // None returns null.
+    private Integer getSelectedPrerequisiteId(JList<Object> list) {
+
+        Object selected = list.getSelectedValue();
+
+        if (selected instanceof PrerequisiteRepository.CourseOption) {
+            PrerequisiteRepository.CourseOption option =
+                    (PrerequisiteRepository.CourseOption) selected;
+
+            return option.getCourseId();
+        }
+
+        return null;
     }
 
     // Validate course details.
@@ -320,6 +462,14 @@ public class AdminDashboard extends JFrame {
                 message,
                 "Invalid Course Details",
                 JOptionPane.WARNING_MESSAGE);
+    }
+
+    private void showDatabaseError(String message, Exception e) {
+        JOptionPane.showMessageDialog(
+                this,
+                message + "\n" + e.getMessage(),
+                "Database Error",
+                JOptionPane.ERROR_MESSAGE);
     }
 
     // Delete a course.
