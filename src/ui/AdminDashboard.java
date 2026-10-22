@@ -32,7 +32,8 @@ public class AdminDashboard extends JFrame {
                             "Credits",
                             "Capacity",
                             "Enrolled",
-                            "Available"
+                            "Available",
+                             "Prerequisite"
                     }, 0) {
 
                 @Override
@@ -108,33 +109,43 @@ public class AdminDashboard extends JFrame {
     }
 
     // Load courses, including capacity and actual enrolled count.
-    private void loadCourses() {
+   
+private void loadCourses() {
 
-        try {
-            List<Course> courses = courseRepository.findAll();
+    try {
+        List<Course> courses = courseRepository.findAll();
 
-            tableModel.setRowCount(0);
+        tableModel.setRowCount(0);
 
-            for (Course course : courses) {
-                tableModel.addRow(new Object[]{
-                        course.getCourseId(),
-                        course.getCourseCode(),
-                        course.getCourseName(),
-                        course.getCredits(),
-                        course.getCapacity(),
-                        course.getEnrolled(),
-                        course.isAvailable() ? "Yes" : "No"
-                });
-            }
+        for (Course course : courses) {
 
-        } catch (RuntimeException e) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Could not load courses:\n" + e.getMessage(),
-                    "Database Error",
-                    JOptionPane.ERROR_MESSAGE);
+            // Get the prerequisite course name.
+            String prerequisiteName =
+                    prerequisiteRepository.findPrerequisiteName(
+                            course.getCourseId());
+
+            tableModel.addRow(new Object[]{
+                    course.getCourseId(),
+                    course.getCourseCode(),
+                    course.getCourseName(),
+                    course.getCredits(),
+                    course.getCapacity(),
+                    course.getEnrolled(),
+                    course.isAvailable() ? "Yes" : "No",
+                    prerequisiteName == null
+                            ? "None"
+                            : prerequisiteName
+            });
         }
+
+    } catch (RuntimeException e) {
+        JOptionPane.showMessageDialog(
+                this,
+                "Could not load courses:\n" + e.getMessage(),
+                "Database Error",
+                JOptionPane.ERROR_MESSAGE);
     }
+}
 
     // Add a course and its prerequisite in one transaction.
     private void addCourse() {
